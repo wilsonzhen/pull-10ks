@@ -113,29 +113,29 @@ class EdgarClient:
         base_url = f"{ARCHIVES_BASE}/{cik}/{acc_clean}"
         stem = f"{ticker}_10K_{report_date}"
 
-        # 1) Check the filing index for an existing PDF
-        try:
-            index = self._get_json(f"{base_url}/index.json")
-            items = index.get("directory", {}).get("item", [])
-            pdfs = [
-                it["name"]
-                for it in items
-                if it.get("name", "").lower().endswith(".pdf")
-            ]
-        except Exception:
-            pdfs = []
-
-        if pdfs:
-            out = output_dir / f"{stem}.pdf"
-            print(f"    Downloading PDF: {pdfs[0]}")
-            self._download(f"{base_url}/{pdfs[0]}", out)
-            return out
-
-        # 2) No PDF in filing — attempt HTML-to-PDF conversion
         primary = filing["primaryDocument"]
         primary_url = f"{base_url}/{primary}"
 
         if convert:
+            # 1) Check the filing index for an existing PDF
+            try:
+                index = self._get_json(f"{base_url}/index.json")
+                items = index.get("directory", {}).get("item", [])
+                pdfs = [
+                    it["name"]
+                    for it in items
+                    if it.get("name", "").lower().endswith(".pdf")
+                ]
+            except Exception:
+                pdfs = []
+
+            if pdfs:
+                out = output_dir / f"{stem}.pdf"
+                print(f"    Downloading PDF: {pdfs[0]}")
+                self._download(f"{base_url}/{pdfs[0]}", out)
+                return out
+
+            # 2) No native PDF — convert HTML to PDF
             try:
                 from weasyprint import HTML as WeasyHTML
 
@@ -152,7 +152,7 @@ class EdgarClient:
             except Exception as e:
                 print(f"    [PDF conversion failed: {e} — saving as HTML]")
 
-        # 3) Fallback — save the raw HTML
+        # Download raw HTML
         out = output_dir / f"{stem}.htm"
         print(f"    Downloading: {primary}")
         self._download(primary_url, out)
@@ -168,14 +168,18 @@ class EdgarClient:
                 try:
                     resp = session.get(url, timeout=timeout)
                     resp.raise_for_status()
-                    return {
+                    result = {
                         "string": resp.content,
-                        "mime_type": resp.headers.get("Content-Type"),
-                        "encoding": resp.encoding,
                         "redirected_url": resp.url,
                     }
+                    content_type = resp.headers.get("Content-Type")
+                    if content_type:
+                        # weasyprint expects just the mime type, not the full header
+                        result["mime_type"] = content_type.split(";")[0].strip()
+                    if resp.encoding:
+                        result["encoding"] = resp.encoding
+                    return result
                 except Exception:
-                    # Return empty content so weasyprint skips the resource
                     return {"string": b"", "mime_type": "text/plain"}
             from weasyprint import default_url_fetcher
 
@@ -203,8 +207,8 @@ def main():
         help="Root output directory (subfolders created per ticker)",
     )
     parser.add_argument(
-        "--no-convert", action="store_true",
-        help="Skip HTML-to-PDF conversion; save HTML when no native PDF exists",
+        "--format", choices=["pdf", "html"], default="html",
+        help="Output file type: html (default) or pdf",
     )
     parser.add_argument(
         "--user-agent",
@@ -216,7 +220,7 @@ def main():
     client = EdgarClient(args.user_agent)
     output = Path(args.output)
     years = set(args.years)
-    convert = not args.no_convert
+    convert = args.format == "pdf"
 
     for ticker in args.tickers:
         ticker = ticker.upper()
