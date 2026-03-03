@@ -50,6 +50,10 @@ pip install -r requirements.txt
 
 `download_10k` first checks the filing index for a native PDF. If none exists and `convert=True`, it uses weasyprint with a custom URL fetcher (`_make_fetcher`) that injects the SEC User-Agent header. Falls back to raw HTML if weasyprint is unavailable.
 
+## Git
+
+- Do NOT add a `Co-Authored-By` line to commit messages.
+
 ## Dependencies
 
 `requests`, `weasyprint` (optional for PDF conversion). Optional: `streamlit` (web app), `pytest` (tests). See `pyproject.toml` for full specification.
