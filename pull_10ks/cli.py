@@ -26,7 +26,11 @@ def main():
     )
     parser.add_argument(
         "--output", required=True,
-        help="Root output directory (subfolders created per ticker)",
+        help="Output directory for downloaded reports",
+    )
+    parser.add_argument(
+        "--group-by-ticker", action="store_true",
+        help="Create a subfolder per ticker inside the output directory",
     )
     parser.add_argument(
         "--format", choices=["pdf", "html"], default="html",
@@ -62,7 +66,7 @@ def main():
             continue
 
         print(f"  Found {len(filings)} filing(s)")
-        ticker_dir = output / ticker
+        ticker_dir = output / ticker if args.group_by_ticker else output
 
         for filing in filings:
             print(

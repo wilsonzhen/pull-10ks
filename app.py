@@ -27,6 +27,7 @@ current_year = datetime.now().year
 start_year = col1.number_input("Start year", min_value=1993, max_value=current_year, value=current_year - 1)
 end_year = col2.number_input("End year", min_value=1993, max_value=current_year, value=current_year)
 fmt = col3.radio("Format", ["HTML", "PDF"], horizontal=True)
+group_by_ticker = st.checkbox("Create a separate folder for each ticker")
 
 # --- Download -----------------------------------------------------------------
 
@@ -75,7 +76,7 @@ if st.button("Download Reports", type="primary"):
             errors.append("No filings found for the given tickers and years.")
 
         for ticker, cik, filings in ticker_filings:
-            ticker_dir = tmp / ticker
+            ticker_dir = tmp / ticker if group_by_ticker else tmp
             for filing in filings:
                 done = len(downloaded_files)
                 progress.progress(done / total if total else 0, text=f"{ticker} — {filing['reportDate']}")
@@ -96,8 +97,10 @@ if st.button("Download Reports", type="primary"):
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 for p in downloaded_files:
-                    # Archive path: TICKER/filename
-                    arcname = f"{p.parent.name}/{p.name}"
+                    if group_by_ticker:
+                        arcname = f"{p.parent.name}/{p.name}"
+                    else:
+                        arcname = p.name
                     zf.write(p, arcname)
             buf.seek(0)
 
