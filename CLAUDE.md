@@ -28,8 +28,11 @@ pytest tests/
 pytest tests/test_client.py::TestCollect10Ks
 pytest tests/test_client.py::TestDownload10k::test_downloads_native_pdf_when_available
 
-# Install dependencies (Streamlit Cloud compatibility)
+# Install dependencies
 pip install -r requirements.txt
+
+# Install Playwright browser
+playwright install chromium
 ```
 
 ## Architecture
@@ -39,8 +42,9 @@ pip install -r requirements.txt
   - **`cli.py`** — CLI entry point via `main()`. Installed as `pull-10ks` console script.
   - **`__init__.py`** — Re-exports `EdgarClient` and constants for convenience (`from pull_10ks import EdgarClient`).
 - **`app.py`** — Streamlit web UI. Accepts tickers/years/format, uses `EdgarClient` to fetch filings, packages results into a ZIP for download.
-- **`tests/test_client.py`** — pytest tests using `unittest.mock`. Tests cover filing filtering (`_collect_10ks`), CIK lookup, filing search with pagination, download logic, and the weasyprint URL fetcher.
+- **`tests/test_client.py`** — pytest tests using `unittest.mock`. Tests cover filing filtering (`_collect_10ks`), CIK lookup, filing search with pagination, download logic, Playwright PDF conversion, and client lifecycle.
 - **`pyproject.toml`** — PEP 621 project metadata, dependencies, and console script entry point.
+- **`Dockerfile`** — Playwright-based Docker image for deploying on Render (or any Docker host).
 
 ### SEC API flow
 
@@ -48,7 +52,7 @@ pip install -r requirements.txt
 
 ### PDF conversion
 
-`download_10k` first checks the filing index for a native PDF. If none exists and `convert=True`, it uses weasyprint with a custom URL fetcher (`_make_fetcher`) that injects the SEC User-Agent header. Falls back to raw HTML if weasyprint is unavailable.
+`download_10k` first checks the filing index for a native PDF. If none exists and `convert=True`, it uses Playwright (headless Chromium) to render the HTML and print to PDF. Falls back to raw HTML if Playwright is unavailable or conversion fails. `EdgarClient` supports context manager usage (`with EdgarClient(...) as client:`) to ensure the browser is closed after use.
 
 ## Git
 
@@ -56,4 +60,11 @@ pip install -r requirements.txt
 
 ## Dependencies
 
-`requests`, `weasyprint` (optional for PDF conversion). Optional: `streamlit` (web app), `pytest` (tests). See `pyproject.toml` for full specification.
+`requests`, `playwright` (for PDF conversion). Optional: `streamlit` (web app), `pytest` (tests). See `pyproject.toml` for full specification. Playwright requires Chromium to be installed (`playwright install chromium`).
+
+## Deployment
+
+Deployed via Docker on Render. The `Dockerfile` uses the Playwright base image with pre-installed browser dependencies. Build and run locally with:
+```bash
+docker build -t pull-10ks . && docker run -p 8501:8501 pull-10ks
+```
