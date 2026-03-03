@@ -43,43 +43,43 @@ def main():
     )
     args = parser.parse_args()
 
-    client = EdgarClient(args.user_agent)
     output = Path(args.output)
     years = set(args.years)
     convert = args.format == "pdf"
 
-    for ticker in args.tickers:
-        ticker = ticker.upper()
-        print(f"\n{'=' * 50}")
-        print(f"  {ticker}")
-        print(f"{'=' * 50}")
+    with EdgarClient(args.user_agent) as client:
+        for ticker in args.tickers:
+            ticker = ticker.upper()
+            print(f"\n{'=' * 50}")
+            print(f"  {ticker}")
+            print(f"{'=' * 50}")
 
-        cik = client.get_cik(ticker)
-        if not cik:
-            print(f"  ERROR: Unknown ticker '{ticker}'")
-            continue
-        print(f"  CIK: {cik}")
+            cik = client.get_cik(ticker)
+            if not cik:
+                print(f"  ERROR: Unknown ticker '{ticker}'")
+                continue
+            print(f"  CIK: {cik}")
 
-        filings = client.get_10k_filings(cik, years)
-        if not filings:
-            print(f"  No 10-K filings found for {sorted(years)}")
-            continue
+            filings = client.get_10k_filings(cik, years)
+            if not filings:
+                print(f"  No 10-K filings found for {sorted(years)}")
+                continue
 
-        print(f"  Found {len(filings)} filing(s)")
-        ticker_dir = output / ticker if args.group_by_ticker else output
+            print(f"  Found {len(filings)} filing(s)")
+            ticker_dir = output / ticker if args.group_by_ticker else output
 
-        for filing in filings:
-            print(
-                f"\n  Period ending: {filing['reportDate']}"
-                f"  (filed {filing['filingDate']})"
-            )
-            try:
-                path = client.download_10k(
-                    cik, filing, ticker_dir, ticker, convert,
+            for filing in filings:
+                print(
+                    f"\n  Period ending: {filing['reportDate']}"
+                    f"  (filed {filing['filingDate']})"
                 )
-                print(f"    Saved: {path}")
-            except Exception as e:
-                print(f"    ERROR: {e}")
+                try:
+                    path = client.download_10k(
+                        cik, filing, ticker_dir, ticker, convert,
+                    )
+                    print(f"    Saved: {path}")
+                except Exception as e:
+                    print(f"    ERROR: {e}")
 
     print(f"\nDone. Reports saved to: {output.resolve()}")
 

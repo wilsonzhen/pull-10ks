@@ -186,55 +186,86 @@ class TestDownload10k:
         client._download.assert_called_once()
 
     def test_downloads_html_when_convert_false(self, client, tmp_path):
+        client._download_text = MagicMock(return_value="<head><title>10-K</title></head>")
         result = client.download_10k("320193", self.FILING, tmp_path, "AAPL", convert=False)
         assert result.suffix == ".htm"
         assert "AAPL_10K_2023-09-30" in result.name
         # Should NOT check the filing index at all
         client._get_json.assert_not_called()
 
-    def test_falls_back_to_html_when_no_pdf_and_weasyprint_missing(self, client, tmp_path):
+    def test_falls_back_to_html_when_no_pdf_and_playwright_missing(self, client, tmp_path):
         client._get_json.return_value = {
             "directory": {"item": [{"name": "aapl-20230930.htm"}]}
         }
-        with patch.dict("sys.modules", {"weasyprint": None}):
+        client._download_text = MagicMock(return_value="<head><title>10-K</title></head>")
+        with patch.dict("sys.modules", {"playwright": None, "playwright.sync_api": None}):
             result = client.download_10k("320193", self.FILING, tmp_path, "AAPL", convert=True)
         assert result.suffix == ".htm"
 
+    def test_converts_html_to_pdf_with_playwright(self, client, tmp_path):
+        client._get_json.return_value = {
+            "directory": {"item": [{"name": "aapl-20230930.htm"}]}
+        }
+        mock_page = MagicMock()
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = mock_page
+        client._browser = mock_browser
+        client._download_text = MagicMock(return_value="<html><body>10-K</body></html>")
 
-# -- _make_fetcher -------------------------------------------------------------
+        result = client.download_10k("320193", self.FILING, tmp_path, "AAPL", convert=True)
 
-class TestMakeFetcher:
-    def test_strips_content_type_params(self, client):
-        mock_resp = MagicMock()
-        mock_resp.content = b"<html></html>"
-        mock_resp.url = "https://example.com"
-        mock_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
-        mock_resp.encoding = "utf-8"
-        mock_resp.raise_for_status = MagicMock()
-        client.session.get = MagicMock(return_value=mock_resp)
+        assert result.suffix == ".pdf"
+        mock_page.route.assert_called_once_with("**/*", client._route_handler)
+        mock_page.set_content.assert_called_once()
+        mock_page.pdf.assert_called_once()
+        mock_page.close.assert_called_once()
 
-        fetcher = client._make_fetcher()
-        result = fetcher("https://example.com/test.htm")
-        assert result["mime_type"] == "text/html"
+    def test_falls_back_to_html_on_conversion_failure(self, client, tmp_path):
+        client._get_json.return_value = {
+            "directory": {"item": [{"name": "aapl-20230930.htm"}]}
+        }
+        mock_page = MagicMock()
+        mock_page.pdf.side_effect = RuntimeError("conversion failed")
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = mock_page
+        client._browser = mock_browser
+        client._download_text = MagicMock(return_value="<html></html>")
 
-    def test_handles_missing_content_type(self, client):
-        mock_resp = MagicMock()
-        mock_resp.content = b"data"
-        mock_resp.url = "https://example.com"
-        mock_resp.headers = {}
-        mock_resp.encoding = None
-        mock_resp.raise_for_status = MagicMock()
-        client.session.get = MagicMock(return_value=mock_resp)
+        result = client.download_10k("320193", self.FILING, tmp_path, "AAPL", convert=True)
 
-        fetcher = client._make_fetcher()
-        result = fetcher("https://example.com/file")
-        assert "mime_type" not in result
-        assert "encoding" not in result
+        assert result.suffix == ".htm"
+        mock_page.close.assert_called_once()
+        assert client._browser is None
 
-    def test_returns_empty_on_http_error(self, client):
-        client.session.get = MagicMock(side_effect=Exception("connection error"))
 
-        fetcher = client._make_fetcher()
-        result = fetcher("https://example.com/broken")
-        assert result["string"] == b""
-        assert result["mime_type"] == "text/plain"
+# -- EdgarClient lifecycle -----------------------------------------------------
+
+class TestEdgarClientLifecycle:
+    def test_close_is_idempotent(self):
+        client = EdgarClient("test")
+        mock_browser = MagicMock()
+        mock_pw = MagicMock()
+        client._browser = mock_browser
+        client._playwright = mock_pw
+
+        client.close()
+        assert client._browser is None
+        assert client._playwright is None
+        mock_browser.close.assert_called_once()
+        mock_pw.stop.assert_called_once()
+
+        # Second close should be a no-op
+        client.close()
+        mock_browser.close.assert_called_once()
+        mock_pw.stop.assert_called_once()
+
+    def test_context_manager(self):
+        with EdgarClient("test") as client:
+            assert isinstance(client, EdgarClient)
+            mock_browser = MagicMock()
+            mock_pw = MagicMock()
+            client._browser = mock_browser
+            client._playwright = mock_pw
+
+        mock_browser.close.assert_called_once()
+        mock_pw.stop.assert_called_once()

@@ -18,27 +18,29 @@ def _mock_client():
     client.get_cik.return_value = "320193"
     client.get_10k_filings.return_value = [FILING]
     client.download_10k.return_value = Path("/tmp/AAPL_10K_2023-09-30.htm")
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
     return client
 
 
 class TestGroupByTicker:
     @patch("pull_10ks.cli.EdgarClient")
     def test_default_downloads_to_flat_output_dir(self, MockClient, tmp_path):
-        MockClient.return_value = _mock_client()
+        client = _mock_client()
+        MockClient.return_value = client
         with patch(
             "sys.argv",
             ["pull-10ks", "--tickers", "AAPL", "--years", "2023", "--output", str(tmp_path)],
         ):
             main()
 
-        _, kwargs = MockClient.return_value.download_10k.call_args
-        # output_dir (3rd positional arg) should be the output dir itself
-        output_dir = MockClient.return_value.download_10k.call_args[0][2]
+        output_dir = client.download_10k.call_args[0][2]
         assert output_dir == tmp_path
 
     @patch("pull_10ks.cli.EdgarClient")
     def test_group_by_ticker_downloads_to_ticker_subdir(self, MockClient, tmp_path):
-        MockClient.return_value = _mock_client()
+        client = _mock_client()
+        MockClient.return_value = client
         with patch(
             "sys.argv",
             ["pull-10ks", "--tickers", "AAPL", "--years", "2023",
@@ -46,7 +48,7 @@ class TestGroupByTicker:
         ):
             main()
 
-        output_dir = MockClient.return_value.download_10k.call_args[0][2]
+        output_dir = client.download_10k.call_args[0][2]
         assert output_dir == tmp_path / "AAPL"
 
     @patch("pull_10ks.cli.EdgarClient")
@@ -55,6 +57,8 @@ class TestGroupByTicker:
         client.get_cik.side_effect = ["320193", "789019"]
         client.get_10k_filings.return_value = [FILING]
         client.download_10k.return_value = Path("/tmp/report.htm")
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
         MockClient.return_value = client
 
         with patch(
@@ -73,6 +77,8 @@ class TestGroupByTicker:
         client.get_cik.side_effect = ["320193", "789019"]
         client.get_10k_filings.return_value = [FILING]
         client.download_10k.return_value = Path("/tmp/report.htm")
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
         MockClient.return_value = client
 
         with patch(

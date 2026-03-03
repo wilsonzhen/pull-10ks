@@ -43,7 +43,6 @@ if st.button("Download Reports", type="primary"):
 
     years = set(range(int(start_year), int(end_year) + 1))
     convert = fmt == "PDF"
-    client = EdgarClient("AnnualReportDownloader admin@example.com")
 
     # Count total work units for the progress bar (lookup + filings per ticker).
     # We don't know filing counts upfront, so we estimate: 1 step per ticker for
@@ -53,7 +52,7 @@ if st.button("Download Reports", type="primary"):
     downloaded_files: list[Path] = []
     errors: list[str] = []
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir, EdgarClient("AnnualReportDownloader admin@example.com") as client:
         tmp = Path(tmpdir)
 
         # Phase 1: resolve tickers and find filings

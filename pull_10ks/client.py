@@ -15,12 +15,101 @@ class EdgarClient:
     """SEC EDGAR API client with rate limiting."""
 
     def __init__(self, user_agent):
+        self._user_agent = user_agent
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": user_agent,
             "Accept-Encoding": "gzip, deflate",
         })
         self._cik_map = None
+        self._playwright = None
+        self._browser = None
+
+    def _get_browser(self):
+        """Lazy-launch headless Chromium, reuse for batch downloads."""
+        if self._browser is None:
+            from playwright.sync_api import sync_playwright
+
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch()
+        return self._browser
+
+    def close(self):
+        """Shut down the browser and Playwright process."""
+        if self._browser is not None:
+            self._browser.close()
+            self._browser = None
+        if self._playwright is not None:
+            self._playwright.stop()
+            self._playwright = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def _download_text(self, url):
+        """Download a URL and return the response text."""
+        time.sleep(REQUEST_DELAY)
+        resp = self.session.get(url)
+        resp.raise_for_status()
+        return resp.text
+
+    def _route_handler(self, route):
+        """Intercept browser requests and proxy through our rate-limited session."""
+        try:
+            time.sleep(REQUEST_DELAY)
+            resp = self.session.get(route.request.url, timeout=10)
+            content_type = resp.headers.get("Content-Type", "application/octet-stream")
+            route.fulfill(
+                status=resp.status_code,
+                headers={"Content-Type": content_type},
+                body=resp.content,
+            )
+        except Exception:
+            route.abort()
+
+    def _setup_page(self, browser, html, base_url, pdf_path):
+        """Load HTML into a page with route interception and render to PDF."""
+        # Inject <base> tag so relative URLs resolve to the SEC filing directory
+        if "<base " not in html.lower():
+            html = html.replace("<head>", f'<head><base href="{base_url}">', 1)
+            if "<head>" not in html.lower():
+                html = f'<base href="{base_url}">' + html
+
+        page = browser.new_page()
+        page.route("**/*", self._route_handler)
+        try:
+            page.set_content(html, wait_until="networkidle", timeout=120000)
+            page.pdf(path=str(pdf_path))
+        finally:
+            page.close()
+
+    def _render_html_to_pdf(self, html, base_url, pdf_path):
+        """Render HTML string to PDF using Playwright. Handles async contexts."""
+        try:
+            import asyncio
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No async loop — use reusable browser (CLI path)
+            self._setup_page(self._get_browser(), html, base_url, pdf_path)
+            return
+
+        # Inside async loop (e.g. Streamlit) — run in a thread
+        from concurrent.futures import ThreadPoolExecutor
+        from playwright.sync_api import sync_playwright
+
+        def _run():
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                try:
+                    self._setup_page(browser, html, base_url, pdf_path)
+                finally:
+                    browser.close()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(_run).result()
 
     def _get_json(self, url):
         time.sleep(REQUEST_DELAY)
@@ -126,54 +215,30 @@ class EdgarClient:
                 self._download(f"{base_url}/{pdfs[0]}", out)
                 return out
 
-            # 2) No native PDF — convert HTML to PDF
+            # 2) No native PDF — download HTML and convert to PDF locally
             try:
-                from weasyprint import HTML as WeasyHTML
-
                 pdf_path = output_dir / f"{stem}.pdf"
                 pdf_path.parent.mkdir(parents=True, exist_ok=True)
                 print(f"    Converting {primary} to PDF...")
-                WeasyHTML(
-                    url=primary_url,
-                    url_fetcher=self._make_fetcher(),
-                ).write_pdf(str(pdf_path))
+                html = self._download_text(primary_url)
+                self._render_html_to_pdf(html, f"{base_url}/", pdf_path)
                 return pdf_path
             except ImportError:
-                print("    [weasyprint not installed — saving as HTML]")
+                print("    [playwright not installed — saving as HTML]")
             except Exception as e:
                 print(f"    [PDF conversion failed: {e} — saving as HTML]")
+                self._browser = None
 
-        # Download raw HTML
+        # Download raw HTML, inject <base> so images resolve when opened locally
         out = output_dir / f"{stem}.htm"
         print(f"    Downloading: {primary}")
-        self._download(primary_url, out)
+        html = self._download_text(primary_url)
+        base_tag = f'<base href="{base_url}/">'
+        if "<base " not in html.lower():
+            html = html.replace("<head>", f"<head>{base_tag}", 1)
+            if "<head>" not in html.lower():
+                html = base_tag + html
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(html, encoding="utf-8")
         return out
 
-    def _make_fetcher(self):
-        """Return a weasyprint-compatible URL fetcher that sends the SEC User-Agent."""
-        session = self.session
-
-        def fetcher(url, timeout=10, ssl_context=None):
-            if url.startswith(("http://", "https://")):
-                time.sleep(0.1)
-                try:
-                    resp = session.get(url, timeout=timeout)
-                    resp.raise_for_status()
-                    result = {
-                        "string": resp.content,
-                        "redirected_url": resp.url,
-                    }
-                    content_type = resp.headers.get("Content-Type")
-                    if content_type:
-                        # weasyprint expects just the mime type, not the full header
-                        result["mime_type"] = content_type.split(";")[0].strip()
-                    if resp.encoding:
-                        result["encoding"] = resp.encoding
-                    return result
-                except Exception:
-                    return {"string": b"", "mime_type": "text/plain"}
-            from weasyprint import default_url_fetcher
-
-            return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
-
-        return fetcher
