@@ -1,14 +1,5 @@
-#!/usr/bin/env python
-"""Download 10-K annual reports from SEC EDGAR as PDFs.
+"""SEC EDGAR API client for downloading 10-K annual reports."""
 
-Usage:
-    python pull_10ks.py --tickers AAPL MSFT --years 2022 2023 --output ./reports
-
-SEC requires a User-Agent header identifying you. Override the default with --user-agent.
-"""
-
-import argparse
-import sys
 import time
 from pathlib import Path
 
@@ -106,7 +97,7 @@ class EdgarClient:
     # -- Download --------------------------------------------------------------
 
     def download_10k(self, cik, filing, output_dir, ticker, convert=True):
-        """Download a single 10-K.  Prefers native PDF; falls back to HTML→PDF."""
+        """Download a single 10-K.  Prefers native PDF; falls back to HTML->PDF."""
         accession = filing["accessionNumber"]
         acc_clean = accession.replace("-", "")
         report_date = filing["reportDate"]
@@ -186,77 +177,3 @@ class EdgarClient:
             return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
 
         return fetcher
-
-
-# -- CLI -----------------------------------------------------------------------
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Download 10-K annual reports from SEC EDGAR",
-    )
-    parser.add_argument(
-        "--tickers", nargs="+", required=True,
-        help="Stock ticker symbols (e.g. AAPL MSFT GOOG)",
-    )
-    parser.add_argument(
-        "--years", nargs="+", type=int, required=True,
-        help="Fiscal years to download (e.g. 2022 2023)",
-    )
-    parser.add_argument(
-        "--output", required=True,
-        help="Root output directory (subfolders created per ticker)",
-    )
-    parser.add_argument(
-        "--format", choices=["pdf", "html"], default="html",
-        help="Output file type: html (default) or pdf",
-    )
-    parser.add_argument(
-        "--user-agent",
-        default="AnnualReportDownloader admin@example.com",
-        help="User-Agent sent to SEC (must include a name and email)",
-    )
-    args = parser.parse_args()
-
-    client = EdgarClient(args.user_agent)
-    output = Path(args.output)
-    years = set(args.years)
-    convert = args.format == "pdf"
-
-    for ticker in args.tickers:
-        ticker = ticker.upper()
-        print(f"\n{'=' * 50}")
-        print(f"  {ticker}")
-        print(f"{'=' * 50}")
-
-        cik = client.get_cik(ticker)
-        if not cik:
-            print(f"  ERROR: Unknown ticker '{ticker}'")
-            continue
-        print(f"  CIK: {cik}")
-
-        filings = client.get_10k_filings(cik, years)
-        if not filings:
-            print(f"  No 10-K filings found for {sorted(years)}")
-            continue
-
-        print(f"  Found {len(filings)} filing(s)")
-        ticker_dir = output / ticker
-
-        for filing in filings:
-            print(
-                f"\n  Period ending: {filing['reportDate']}"
-                f"  (filed {filing['filingDate']})"
-            )
-            try:
-                path = client.download_10k(
-                    cik, filing, ticker_dir, ticker, convert,
-                )
-                print(f"    Saved: {path}")
-            except Exception as e:
-                print(f"    ERROR: {e}")
-
-    print(f"\nDone. Reports saved to: {output.resolve()}")
-
-
-if __name__ == "__main__":
-    main()

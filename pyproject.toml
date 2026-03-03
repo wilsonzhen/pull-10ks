@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pull-10ks"
+version = "0.1.0"
+description = "Download 10-K annual reports from SEC EDGAR"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "weasyprint",
+]
+
+[project.optional-dependencies]
+app = ["streamlit"]
+dev = ["pytest"]
+
+[project.scripts]
+pull-10ks = "pull_10ks.cli:main"
