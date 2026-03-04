@@ -82,7 +82,12 @@ class EdgarClient:
         page.route("**/*", self._route_handler)
         try:
             page.set_content(html, wait_until="networkidle", timeout=120000)
-            page.pdf(path=str(pdf_path))
+            page.emulate_media(media="screen")
+            page.pdf(
+                path=str(pdf_path),
+                print_background=True,
+                margin={"top": "0.4in", "bottom": "0.4in", "left": "0.5in", "right": "0.5in"},
+            )
         finally:
             page.close()
 
