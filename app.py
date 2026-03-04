@@ -91,7 +91,7 @@ if st.button("Download Reports", type="primary"):
         for err in errors:
             st.warning(err)
 
-        # Build zip
+        # Build zip and store in session state so the button persists across reruns
         if downloaded_files:
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -101,14 +101,16 @@ if st.button("Download Reports", type="primary"):
                     else:
                         arcname = p.name
                     zf.write(p, arcname)
-            buf.seek(0)
-
-            st.download_button(
-                label=f"Download {len(downloaded_files)} report(s) as ZIP",
-                data=buf,
-                file_name="10k_reports.zip",
-                mime="application/zip",
-                type="primary",
-            )
+            st.session_state["zip_data"] = buf.getvalue()
+            st.session_state["zip_count"] = len(downloaded_files)
         elif not errors:
             st.info("No reports downloaded.")
+
+if "zip_data" in st.session_state:
+    st.download_button(
+        label=f"Download {st.session_state['zip_count']} report(s) as ZIP",
+        data=st.session_state["zip_data"],
+        file_name="10k_reports.zip",
+        mime="application/zip",
+        type="primary",
+    )
